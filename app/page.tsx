@@ -622,7 +622,7 @@ export default function HomePage() {
             <>
               {result.mode === "random" && (
                 <p className="meta" style={{ marginTop: "0.5rem" }}>
-                  New country, position &amp; name each time you try again.
+                  Try again for a different country 👇
                 </p>
               )}
               <div className="actions">

@@ -24,15 +24,87 @@ export const maxDuration = 300;
 // medium ≈ $0.042/image  (~120 images on $5)   ← default
 // high   ≈ $0.167/image  (~30 images on $5)
 const IMAGE_QUALITY = "medium" as "low" | "medium" | "high";
-const IMAGE_SIZE = "1024x1024" as const; // square = cheapest; "1024x1536" = portrait but costs ~50% more
+const IMAGE_SIZE = "1024x1024" as const;
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+// ── Rate limiting (in-memory — resets on server restart / cold start) ──────
+// Good enough for a fun viral app; swap for Redis if you need hard guarantees.
+
+const WINDOW_MS = 24 * 60 * 60 * 1000;
+
+// Per-IP: max 5 successful generations per rolling 24h window
+const IP_MAX = 5;
+type IpRecord = { count: number; since: number };
+const ipMap = new Map<string, IpRecord>();
+
+// Global: max 500 successful generations per day (cost safety switch)
+const GLOBAL_MAX = 500;
+let globalCount = 0;
+let globalWindowStart = Date.now();
+
+function getIp(req: Request): string {
+  return (
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    req.headers.get("x-real-ip") ??
+    "unknown"
+  );
+}
+
+function isIpLimited(ip: string): boolean {
+  const r = ipMap.get(ip);
+  if (!r) return false;
+  if (Date.now() - r.since > WINDOW_MS) { ipMap.delete(ip); return false; }
+  return r.count >= IP_MAX;
+}
+
+function incrementIp(ip: string): void {
+  const r = ipMap.get(ip);
+  if (!r || Date.now() - r.since > WINDOW_MS) {
+    ipMap.set(ip, { count: 1, since: Date.now() });
+  } else {
+    ipMap.set(ip, { count: r.count + 1, since: r.since });
+  }
+}
+
+function isGlobalLimited(): boolean {
+  if (Date.now() - globalWindowStart > WINDOW_MS) {
+    globalCount = 0;
+    globalWindowStart = Date.now();
+  }
+  return globalCount >= GLOBAL_MAX;
+}
+
+function incrementGlobal(): void {
+  if (Date.now() - globalWindowStart > WINDOW_MS) {
+    globalCount = 1;
+    globalWindowStart = Date.now();
+  } else {
+    globalCount++;
+  }
+}
+// ──────────────────────────────────────────────────────────────────────────
 
 function isOutfieldPosition(s: string): s is OutfieldPosition {
   return (OUTFIELD_POSITIONS as readonly string[]).includes(s);
 }
 
 export async function POST(req: Request) {
+  // Rate limit checks — before any expensive work
+  const ip = getIp(req);
+  if (isGlobalLimited()) {
+    return NextResponse.json(
+      { error: "High demand right now — try again later" },
+      { status: 429 }
+    );
+  }
+  if (isIpLimited(ip)) {
+    return NextResponse.json(
+      { error: "High demand — try again later" },
+      { status: 429 }
+    );
+  }
+
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
     return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
@@ -142,6 +214,10 @@ export async function POST(req: Request) {
     if (!b64) throw new Error("No image returned from OpenAI");
 
     setCachedTransform(cacheKey, { imageBase64: b64, mimeType: "image/png" });
+
+    // Only count genuine successful transformations
+    incrementIp(ip);
+    incrementGlobal();
 
     return NextResponse.json({
       imageBase64: b64,
