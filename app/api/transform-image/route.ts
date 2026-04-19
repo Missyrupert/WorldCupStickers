@@ -33,6 +33,22 @@ function isOutfieldPosition(s: string): s is OutfieldPosition {
   return (OUTFIELD_POSITIONS as readonly string[]).includes(s);
 }
 
+/** Pull retry_after seconds out of a Replicate 429 error message. */
+function parseRetryAfter(errMsg: string): number {
+  try {
+    const match = errMsg.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]) as { retry_after?: number };
+      if (typeof parsed.retry_after === "number") return parsed.retry_after;
+    }
+  } catch { /* ignore */ }
+  return 10; // safe default
+}
+
+function is429(errMsg: string): boolean {
+  return errMsg.includes("429");
+}
+
 async function runModel(
   replicate: Replicate,
   imageBlob: Blob,
@@ -177,7 +193,13 @@ export async function POST(req: Request) {
         break;
       } catch (err) {
         lastError = err;
-        if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
+        if (attempt === 0) {
+          const msg = err instanceof Error ? err.message : String(err);
+          const waitMs = is429(msg)
+            ? (parseRetryAfter(msg) + 1) * 1000  // honour Replicate's retry_after
+            : 1500;
+          await new Promise((r) => setTimeout(r, waitMs));
+        }
       }
     }
 
