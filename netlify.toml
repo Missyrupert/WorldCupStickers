@@ -1,0 +1,12 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NEXT_TELEMETRY_DISABLED = "1"
+  NODE_VERSION = "20"
+
+# Extend function timeout — image generation takes 90–150s
+# Requires Netlify Pro; free tier caps at 10s
+[functions]
+  timeout = 180

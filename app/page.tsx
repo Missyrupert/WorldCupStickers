@@ -1,0 +1,600 @@
+"use client";
+
+import StickerCard from "@/components/StickerCard";
+import { preprocessImageForUpload } from "@/lib/preprocessImageForUpload";
+import {
+  getCountriesForYear,
+  getWorldCupYears,
+  OUTFIELD_POSITIONS,
+  randomCountryForYear,
+  randomOutfieldPosition,
+  type CompetitionMode,
+  type OutfieldPosition,
+} from "@/lib/worldCup";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+const API_FAILURE_MSG = "Something went wrong. Please try again.";
+
+function safeSlug(s: string): string {
+  return s.replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").slice(0, 56) || "sticker";
+}
+
+type Mode = "random" | "custom";
+
+type TransformResult = {
+  imageBase64: string;
+  mimeType: string;
+  year: number;
+  country: string;
+  position: string;
+  displayName: string;
+  mode: Mode;
+  competitionMode: CompetitionMode;
+};
+
+type PendingSticker = {
+  imageSrc: string;
+  displayName: string;
+  country: string;
+  year: number;
+  position: string;
+  competitionMode: CompetitionMode;
+  mode: Mode;
+};
+
+export default function HomePage() {
+  const [competitionMode, setCompetitionMode] = useState<CompetitionMode>("men");
+  const [mode, setMode] = useState<Mode>("random");
+  const [year, setYear] = useState<number>(2022);
+  const [country, setCountry] = useState("");
+  const [position, setPosition] = useState<OutfieldPosition>("Midfielder");
+  const [userName, setUserName] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  const [camOn, setCamOn] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<TransformResult | null>(null);
+  const [pendingSticker, setPendingSticker] = useState<PendingSticker | null>(null);
+
+  const stickerRef = useRef<HTMLDivElement>(null);
+  const generatingRef = useRef(false);
+
+  const tournamentYears = getWorldCupYears(competitionMode);
+  const countries = getCountriesForYear(year, competitionMode);
+
+  useEffect(() => {
+    if (!countries.length) return;
+    if (!countries.includes(country)) setCountry(countries[0]!);
+  }, [countries, country]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl?.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  const stopCamera = useCallback(() => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    setCamOn(false);
+  }, []);
+
+  useEffect(() => () => stopCamera(), [stopCamera]);
+
+  const setImageFile = useCallback((f: File | null) => {
+    setFile(f);
+    setPreviewUrl((prev) => {
+      if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+      return f ? URL.createObjectURL(f) : null;
+    });
+  }, []);
+
+  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) setImageFile(f);
+  };
+
+  const startCamera = async () => {
+    setError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false,
+      });
+      streamRef.current = stream;
+      setCamOn(true);
+      requestAnimationFrame(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          void videoRef.current.play();
+        }
+      });
+    } catch {
+      setError("Camera access denied. Please upload a photo instead.");
+    }
+  };
+
+  const captureFromCamera = () => {
+    const video = videoRef.current;
+    if (!video || video.videoWidth === 0) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return;
+        setImageFile(new File([blob], "selfie.jpg", { type: "image/jpeg" }));
+        stopCamera();
+      },
+      "image/jpeg",
+      0.92
+    );
+  };
+
+  const readJsonResponse = async (
+    res: Response,
+    label: string
+  ): Promise<Record<string, unknown>> => {
+    const raw = await res.text();
+    if (!res.ok) {
+      try {
+        const err = JSON.parse(raw) as { error?: string };
+        throw new Error(err.error ?? raw ?? `${label} failed (${res.status})`);
+      } catch (parseErr) {
+        if (parseErr instanceof SyntaxError) throw new Error(raw || `${label} failed (${res.status})`);
+        throw parseErr;
+      }
+    }
+    try {
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      throw new Error(`Invalid response from ${label}`);
+    }
+  };
+
+  const generate = async () => {
+    if (generatingRef.current) return;
+    setError(null);
+
+    if (!file) {
+      setError("Please upload a photo or take a selfie first.");
+      return;
+    }
+    if (!userName.trim()) {
+      setError("Please enter your name.");
+      return;
+    }
+    if (mode === "custom" && !country) {
+      setError("Please select a country.");
+      return;
+    }
+
+    const pickCountry = mode === "random" ? randomCountryForYear(year, competitionMode) : country;
+    const pickPosition = mode === "random" ? randomOutfieldPosition() : position;
+
+    generatingRef.current = true;
+    setLoading(true);
+    // Only show blurred placeholder on first generation.
+    // On re-runs keep the previous result visible until the new one arrives.
+    if (!result) {
+      setPendingSticker({
+        imageSrc: previewUrl!,
+        displayName: mode === "custom" ? userName.trim() : "…",
+        country: pickCountry,
+        year,
+        position: pickPosition,
+        competitionMode,
+        mode,
+      });
+    }
+
+    try {
+      const processedFile = await preprocessImageForUpload(file);
+
+      const fd = new FormData();
+      fd.append("image", processedFile);
+      fd.append("mode", mode);
+      fd.append("competitionMode", competitionMode);
+      fd.append("year", String(year));
+      fd.append("userName", userName.trim());
+      fd.append("country", pickCountry);
+      fd.append("position", pickPosition);
+
+      if (mode === "random") {
+        const [imgRes, nameRes] = await Promise.all([
+          fetch("/api/transform-image", { method: "POST", body: fd }),
+          fetch("/api/generate-name", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userName: userName.trim(), country: pickCountry, competitionMode }),
+          }),
+        ]);
+
+        const [data, namePayload] = await Promise.all([
+          readJsonResponse(imgRes, "transform-image"),
+          readJsonResponse(nameRes, "generate-name"),
+        ]);
+
+        const imageBase64 = typeof data.imageBase64 === "string" ? data.imageBase64 : "";
+        if (!imageBase64) throw new Error("No image returned");
+
+        const displayName = typeof namePayload.name === "string" ? namePayload.name.trim() : "";
+        if (!displayName) throw new Error("No name returned");
+
+        setResult({
+          imageBase64,
+          mimeType: typeof data.mimeType === "string" ? data.mimeType : "image/png",
+          year: typeof data.year === "number" ? data.year : year,
+          country: typeof data.country === "string" ? data.country : pickCountry,
+          position: typeof data.position === "string" ? data.position : pickPosition,
+          displayName,
+          mode: "random",
+          competitionMode: data.competitionMode === "women" ? "women" : "men",
+        });
+      } else {
+        const imgRes = await fetch("/api/transform-image", { method: "POST", body: fd });
+        const data = await readJsonResponse(imgRes, "transform-image");
+
+        const imageBase64 = typeof data.imageBase64 === "string" ? data.imageBase64 : "";
+        if (!imageBase64) throw new Error("No image returned");
+
+        const displayName =
+          typeof data.displayName === "string" && data.displayName.trim()
+            ? data.displayName.trim()
+            : userName.trim();
+
+        setResult({
+          imageBase64,
+          mimeType: typeof data.mimeType === "string" ? data.mimeType : "image/png",
+          year: typeof data.year === "number" ? data.year : year,
+          country: typeof data.country === "string" ? data.country : pickCountry,
+          position: typeof data.position === "string" ? data.position : pickPosition,
+          displayName,
+          mode: "custom",
+          competitionMode: data.competitionMode === "women" ? "women" : "men",
+        });
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : API_FAILURE_MSG);
+    } finally {
+      setLoading(false);
+      setPendingSticker(null);
+      generatingRef.current = false;
+    }
+  };
+
+  const stickerFilename = (r: TransformResult) =>
+    `sticker-${safeSlug(r.country)}-${r.year}.png`;
+
+  const renderStickerPng = async (): Promise<string> => {
+    const { toPng } = await import("html-to-image");
+    return toPng(stickerRef.current!, { pixelRatio: 2, cacheBust: true });
+  };
+
+  const downloadSticker = async () => {
+    if (!result || !stickerRef.current) return;
+    try {
+      const dataUrl = await renderStickerPng();
+      const a = document.createElement("a");
+      a.download = stickerFilename(result);
+      a.href = dataUrl;
+      a.click();
+    } catch {
+      setError("Download failed. Try again.");
+    }
+  };
+
+  const shareSticker = async () => {
+    if (!result || !stickerRef.current) return;
+    try {
+      const dataUrl = await renderStickerPng();
+      const blob = await fetch(dataUrl).then((r) => r.blob());
+      const filename = stickerFilename(result);
+      const pngFile = new File([blob], filename, { type: "image/png" });
+      const caption = `I just got drafted into the ${result.year} ${result.country} squad 😂`;
+
+      if (navigator.share && navigator.canShare?.({ files: [pngFile] })) {
+        await navigator.share({ files: [pngFile], title: "My World Cup sticker", text: caption });
+        return;
+      }
+      const a = document.createElement("a");
+      a.download = filename;
+      a.href = URL.createObjectURL(blob);
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      setError("Share failed. Try downloading instead.");
+    }
+  };
+
+  const tryAgain = () => {
+    // Keep image + year. Re-randomise country, position, name via generate().
+    // Temporarily force random mode pick by calling generate() — mode state already handles this.
+    void generate();
+  };
+
+  const stickerImageSrc =
+    result != null
+      ? `data:${result.mimeType};base64,${result.imageBase64}`
+      : (pendingSticker?.imageSrc ?? "");
+  const stickerMeta = result ?? pendingSticker;
+  // Blur placeholder only on first generation (no previous result yet)
+  const stickerImagePending = loading && result === null && pendingSticker !== null;
+  // Dimming overlay when re-generating over an existing result
+  const stickerRegenerating = loading && result !== null;
+
+  return (
+    <main className="layout-main">
+      <header className="layout-header">
+        <div className="header-badge">⚽ AI STICKER GENERATOR</div>
+        <h1>World Cup Sticker Generator</h1>
+        <p className="sub">
+          Upload your photo and become a FIFA World Cup legend. AI transforms you into a
+          photorealistic footballer — same face, national kit, stadium backdrop. Pick your
+          tournament year, country, and position.
+        </p>
+      </header>
+
+      <div className="layout-columns">
+        {/* ── Left: Photo panel ── */}
+        <section className="card layout-left">
+          <h2>Your Photo</h2>
+
+          <label htmlFor="file">Upload an image</label>
+          <input
+            id="file"
+            type="file"
+            accept="image/*"
+            disabled={loading}
+            onChange={onFileChange}
+          />
+
+          <p className="hint" style={{ marginTop: "0.75rem" }}>
+            Or use your camera — position your face in the oval guide.
+          </p>
+
+          <div className="row" style={{ marginTop: "0.5rem" }}>
+            {!camOn ? (
+              <button type="button" className="btn secondary" disabled={loading} onClick={startCamera}>
+                📷 Open camera
+              </button>
+            ) : (
+              <>
+                <button type="button" className="btn secondary" onClick={stopCamera}>
+                  Close
+                </button>
+                <button type="button" className="btn" disabled={loading} onClick={captureFromCamera}>
+                  Capture photo
+                </button>
+              </>
+            )}
+          </div>
+
+          {camOn && (
+            <div className="cam-container" style={{ marginTop: "0.75rem" }}>
+              <video ref={videoRef} className="cam" playsInline muted />
+              <div className="cam-overlay" aria-hidden>
+                <div className="cam-oval-guide" />
+                <span className="cam-guide-text">Center your face</span>
+              </div>
+            </div>
+          )}
+
+          {!camOn && (
+            <div className="preview-wrap" style={{ marginTop: "0.75rem" }}>
+              {previewUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={previewUrl} alt="Your photo preview" />
+              ) : (
+                <span className="hint" style={{ padding: "1rem" }}>No image selected</span>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* ── Right: Settings panel ── */}
+        <section className="card layout-right">
+          <h2>Sticker Settings</h2>
+
+          <label htmlFor="competition">Competition</label>
+          <select
+            id="competition"
+            value={competitionMode}
+            disabled={loading}
+            onChange={(e) => {
+              const next = e.target.value as CompetitionMode;
+              setCompetitionMode(next);
+              const ys = getWorldCupYears(next);
+              setYear(ys[ys.length - 1]!);
+            }}
+          >
+            <option value="men">Men&apos;s World Cup</option>
+            <option value="women">Women&apos;s World Cup</option>
+          </select>
+
+          <label htmlFor="year" style={{ marginTop: "1rem", display: "block" }}>
+            Tournament year
+          </label>
+          <select
+            id="year"
+            value={year}
+            disabled={loading}
+            onChange={(e) => setYear(Number(e.target.value))}
+          >
+            {tournamentYears.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+
+          <div style={{ marginTop: "1rem" }}>
+            <label>Mode</label>
+            <div className="toggle" role="group" aria-label="Generation mode">
+              <button
+                type="button"
+                className={mode === "random" ? "active" : ""}
+                disabled={loading}
+                onClick={() => setMode("random")}
+              >
+                Random
+              </button>
+              <button
+                type="button"
+                className={mode === "custom" ? "active" : ""}
+                disabled={loading}
+                onClick={() => setMode("custom")}
+              >
+                Custom
+              </button>
+            </div>
+            <p className="hint">
+              {mode === "random"
+                ? "Random country + position. Claude AI adapts your name to match."
+                : "You choose country and position. Your name appears exactly as typed."}
+            </p>
+          </div>
+
+          <div style={{ marginTop: "1rem" }}>
+            <label htmlFor="userName">Your full name</label>
+            <input
+              id="userName"
+              type="text"
+              placeholder="e.g. Chris Lee"
+              value={userName}
+              disabled={loading}
+              onChange={(e) => setUserName(e.target.value)}
+              autoComplete="name"
+            />
+          </div>
+
+          {mode === "custom" && (
+            <>
+              <div style={{ marginTop: "1rem" }}>
+                <label htmlFor="country">Country</label>
+                <select
+                  id="country"
+                  value={country}
+                  disabled={loading}
+                  onChange={(e) => setCountry(e.target.value)}
+                >
+                  {countries.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ marginTop: "1rem" }}>
+                <label htmlFor="position">Position</label>
+                <select
+                  id="position"
+                  value={position}
+                  disabled={loading}
+                  onChange={(e) => setPosition(e.target.value as OutfieldPosition)}
+                >
+                  {OUTFIELD_POSITIONS.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
+
+          <div style={{ marginTop: "1.5rem" }}>
+            <button
+              type="button"
+              className="btn btn-generate btn-full"
+              onClick={() => void generate()}
+              disabled={loading}
+              aria-busy={loading}
+            >
+              {loading ? (
+                <>
+                  <span className="spinner spinner-in-btn" aria-hidden />
+                  Generating your sticker…
+                </>
+              ) : (
+                "⚡ Generate sticker"
+              )}
+            </button>
+          </div>
+
+          {error && <p className="error">{error}</p>}
+        </section>
+      </div>
+
+      {/* ── Sticker output ── */}
+      {stickerMeta && (
+        <section className="card layout-output">
+          <h2>Your Sticker</h2>
+          <div className={stickerRegenerating ? "sticker-regenerating" : ""}>
+            <StickerCard
+              key={result ? `r-${result.imageBase64.slice(0, 40)}` : "pending"}
+              ref={stickerRef}
+              imageSrc={stickerImageSrc}
+              displayName={stickerMeta.displayName}
+              country={stickerMeta.country}
+              year={stickerMeta.year}
+              position={stickerMeta.position}
+              competitionMode={stickerMeta.competitionMode}
+              imagePending={stickerImagePending}
+            />
+          </div>
+
+          {loading && (
+            <p className="meta" style={{ marginTop: "0.75rem" }}>
+              <span className="spinner" aria-hidden style={{ display: "inline-block", verticalAlign: "middle", marginRight: "0.4rem" }} />
+              {stickerRegenerating ? "Generating new sticker…" : "AI is transforming your photo…"}
+            </p>
+          )}
+
+          {result && (
+            <>
+              {result.mode === "random" && (
+                <p className="meta" style={{ marginTop: "0.5rem" }}>
+                  New country, position &amp; name each time you try again.
+                </p>
+              )}
+              <div className="actions">
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={loading}
+                  onClick={tryAgain}
+                >
+                  🔄 Try Again
+                </button>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  onClick={() => void shareSticker()}
+                >
+                  📤 Share
+                </button>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  onClick={() => void downloadSticker()}
+                >
+                  ⬇ Download
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
+    </main>
+  );
+}
