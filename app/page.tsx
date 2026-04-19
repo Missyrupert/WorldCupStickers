@@ -15,6 +15,37 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const API_FAILURE_MSG = "Something went wrong. Please try again.";
 
+// ── Per-user generation limit ──────────────────────────────────────────────
+const GEN_LIMIT_KEY = "wc_gens";
+const MAX_FREE_GENS = 3;
+const RESET_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+type GenRecord = { count: number; since: number };
+
+function readGenRecord(): GenRecord {
+  try {
+    const raw = typeof window !== "undefined" ? localStorage.getItem(GEN_LIMIT_KEY) : null;
+    if (!raw) return { count: 0, since: Date.now() };
+    const r = JSON.parse(raw) as GenRecord;
+    // Expired window — treat as fresh
+    if (Date.now() - r.since > RESET_MS) return { count: 0, since: Date.now() };
+    return r;
+  } catch {
+    return { count: 0, since: Date.now() };
+  }
+}
+
+function bumpGenRecord(): number {
+  const r = readGenRecord();
+  const updated: GenRecord =
+    r.count === 0
+      ? { count: 1, since: Date.now() }       // first gen — start the window now
+      : { count: r.count + 1, since: r.since }; // subsequent — keep original window
+  localStorage.setItem(GEN_LIMIT_KEY, JSON.stringify(updated));
+  return MAX_FREE_GENS - updated.count; // returns remaining after this bump
+}
+// ──────────────────────────────────────────────────────────────────────────
+
 function safeSlug(s: string): string {
   return s.replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").slice(0, 56) || "sticker";
 }
@@ -61,6 +92,13 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  const [gensLeft, setGensLeft] = useState<number>(MAX_FREE_GENS);
+
+  // Initialise generation counter from localStorage on mount
+  useEffect(() => {
+    const { count } = readGenRecord();
+    setGensLeft(Math.max(0, MAX_FREE_GENS - count));
+  }, []);
   const [result, setResult] = useState<TransformResult | null>(null);
   const [pendingSticker, setPendingSticker] = useState<PendingSticker | null>(null);
 
@@ -162,6 +200,14 @@ export default function HomePage() {
     if (generatingRef.current) return;
     setError(null);
 
+    // Generation limit check
+    const { count, since } = readGenRecord();
+    const withinWindow = Date.now() - since <= RESET_MS;
+    if (withinWindow && count >= MAX_FREE_GENS) {
+      setError("Free limit reached – come back tomorrow.");
+      return;
+    }
+
     if (!file) {
       setError("Take a selfie first — then hit Generate.");
       return;
@@ -249,6 +295,7 @@ export default function HomePage() {
           mode: "random",
           competitionMode: data.competitionMode === "women" ? "women" : "men",
         });
+        setGensLeft(bumpGenRecord());
       } else {
         const imgRes = await fetch("/api/transform-image", { method: "POST", body: fd });
         const data = await readJsonResponse(imgRes, "transform-image");
@@ -276,6 +323,7 @@ export default function HomePage() {
           mode: "custom",
           competitionMode: data.competitionMode === "women" ? "women" : "men",
         });
+        setGensLeft(bumpGenRecord());
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : API_FAILURE_MSG);
@@ -534,6 +582,11 @@ export default function HomePage() {
           )}
         </button>
         {error && <p className="error" style={{ textAlign: "center" }}>{error}</p>}
+        {!error && gensLeft > 0 && (
+          <p className="hint" style={{ textAlign: "center", marginTop: "0.5rem" }}>
+            {gensLeft} free {gensLeft === 1 ? "generation" : "generations"} remaining today
+          </p>
+        )}
       </div>
 
       {/* ── Sticker output ── */}
