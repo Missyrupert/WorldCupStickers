@@ -273,6 +273,13 @@ input[type="file"] {
   margin-top: 0.75rem;
 }
 
+.warning {
+  color: #f0a840;
+  font-size: 0.85rem;
+  margin-top: 0.6rem;
+  text-align: center;
+}
+
 .preview-wrap {
   margin-top: 0.75rem;
   border-radius: 10px;

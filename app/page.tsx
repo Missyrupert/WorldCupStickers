@@ -58,6 +58,7 @@ export default function HomePage() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [result, setResult] = useState<TransformResult | null>(null);
   const [pendingSticker, setPendingSticker] = useState<PendingSticker | null>(null);
 
@@ -182,6 +183,7 @@ export default function HomePage() {
 
     generatingRef.current = true;
     setLoading(true);
+    setWarning(null);
     // Only show blurred placeholder on first generation.
     // On re-runs keep the previous result visible until the new one arrives.
     if (!result) {
@@ -229,6 +231,8 @@ export default function HomePage() {
         const displayName = typeof namePayload.name === "string" ? namePayload.name.trim() : "";
         if (!displayName) throw new Error("No name returned");
 
+        if (data.fallback) setWarning("Couldn't transform this one — try again for a fresh attempt.");
+
         setResult({
           imageBase64,
           mimeType: typeof data.mimeType === "string" ? data.mimeType : "image/png",
@@ -245,6 +249,8 @@ export default function HomePage() {
 
         const imageBase64 = typeof data.imageBase64 === "string" ? data.imageBase64 : "";
         if (!imageBase64) throw new Error("No image returned");
+
+        if (data.fallback) setWarning("Couldn't transform this one — try again for a fresh attempt.");
 
         const displayName =
           typeof data.displayName === "string" && data.displayName.trim()
@@ -558,6 +564,10 @@ export default function HomePage() {
               <span className="spinner" aria-hidden style={{ display: "inline-block", verticalAlign: "middle", marginRight: "0.4rem" }} />
               {stickerRegenerating ? "Generating new sticker…" : "AI is transforming your photo…"}
             </p>
+          )}
+
+          {warning && !loading && (
+            <p className="warning">{warning}</p>
           )}
 
           {result && (
