@@ -231,7 +231,10 @@ export default function HomePage() {
         const displayName = typeof namePayload.name === "string" ? namePayload.name.trim() : "";
         if (!displayName) throw new Error("No name returned");
 
-        if (data.fallback) setWarning("Couldn't transform this one — try again for a fresh attempt.");
+        if (data.fallback) {
+          const reason = typeof data.fallbackReason === "string" ? ` (${data.fallbackReason})` : "";
+          setWarning(`Couldn't transform this one — try again for a fresh attempt.${reason}`);
+        }
 
         setResult({
           imageBase64,
@@ -250,7 +253,10 @@ export default function HomePage() {
         const imageBase64 = typeof data.imageBase64 === "string" ? data.imageBase64 : "";
         if (!imageBase64) throw new Error("No image returned");
 
-        if (data.fallback) setWarning("Couldn't transform this one — try again for a fresh attempt.");
+        if (data.fallback) {
+          const reason = typeof data.fallbackReason === "string" ? ` (${data.fallbackReason})` : "";
+          setWarning(`Couldn't transform this one — try again for a fresh attempt.${reason}`);
+        }
 
         const displayName =
           typeof data.displayName === "string" && data.displayName.trim()

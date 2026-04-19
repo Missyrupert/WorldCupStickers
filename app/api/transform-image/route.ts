@@ -19,22 +19,15 @@ import Replicate from "replicate";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const MODEL = "stability-ai/sdxl";
-const STRENGTH_DEFAULT = 0.38; // balanced: visible kit change, face preserved
-const STRENGTH_RETRY   = 0.42; // adaptive retry if output looks unchanged
-const STRENGTH_MAX     = 0.45; // hard ceiling — never exceed
-const GUIDANCE_SCALE = 7.5;
-const STEPS = 25;
+// instruct-pix2pix: battle-tested img2img on Replicate, accepts Blob file uploads.
+// image_guidance_scale controls identity preservation (higher = more faithful to original).
+const MODEL = "timothybrooks/instruct-pix2pix";
+const IMAGE_GUIDANCE_DEFAULT = 2.0; // faithful to original face
+const IMAGE_GUIDANCE_RETRY   = 1.5; // adaptive: allow more change if first run was unchanged
+const TEXT_GUIDANCE = 7.5;
+const STEPS = 20;
 const TIMEOUT_MS = 55_000;
-
-// SDXL at 768×1024 always produces PNG > 150 KB.
-// If decoded output is smaller, the model likely returned a near-unchanged image.
-const MIN_TRANSFORMED_BYTES = 150_000;
-
-const NEGATIVE_PROMPT =
-  "different face, changed identity, altered facial features, face replacement, " +
-  "beautified, smoothed skin, cartoon, painting, illustration, anime, deformed, " +
-  "unrealistic, different person, bad quality, watermark";
+const MIN_TRANSFORMED_BYTES = 80_000; // pix2pix output < 80KB = likely unchanged
 
 function isOutfieldPosition(s: string): s is OutfieldPosition {
   return (OUTFIELD_POSITIONS as readonly string[]).includes(s);
@@ -42,28 +35,22 @@ function isOutfieldPosition(s: string): s is OutfieldPosition {
 
 async function runModel(
   replicate: Replicate,
-  imageDataUrl: string,
+  imageBlob: Blob,
   prompt: string,
-  strength: number
+  imageGuidance: number
 ): Promise<string> {
-  const clampedStrength = Math.min(strength, STRENGTH_MAX);
   const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error("timed out")), TIMEOUT_MS)
+    setTimeout(() => reject(new Error("Request timed out after 55s")), TIMEOUT_MS)
   );
 
   const output = await Promise.race([
     replicate.run(MODEL, {
       input: {
-        image: imageDataUrl,
+        image: imageBlob,
         prompt,
-        negative_prompt: NEGATIVE_PROMPT,
-        prompt_strength: clampedStrength,
         num_inference_steps: STEPS,
-        guidance_scale: GUIDANCE_SCALE,
-        width: 768,
-        height: 1024,
-        num_outputs: 1,
-        apply_watermark: false,
+        image_guidance_scale: imageGuidance,
+        guidance_scale: TEXT_GUIDANCE,
       },
     }),
     timeout,
@@ -74,7 +61,7 @@ async function runModel(
     Array.isArray(output) && output.length > 0 ? String(output[0]) :
     String(output);
 
-  if (!url) throw new Error("No image URL returned from Replicate");
+  if (!url || url === "undefined") throw new Error("No image URL returned from Replicate");
   return url;
 }
 
@@ -86,7 +73,6 @@ export async function POST(req: Request) {
 
   const replicate = new Replicate({ auth: apiToken });
 
-  // Parsed early so fallback can echo them back
   let year = 0;
   let country = "";
   let position: OutfieldPosition = "Midfielder";
@@ -167,26 +153,22 @@ export async function POST(req: Request) {
     }
 
     const prompt = buildTransformImagePrompt(year, country, competitionMode);
-    const imageDataUrl = `data:image/jpeg;base64,${originalB64}`;
+    // Pass as Blob — Replicate SDK uploads it properly, avoids data URL rejection
+    const imageBlob = new Blob([bytes], { type: "image/jpeg" });
 
-    // Attempt 1: default strength (0.38)
-    // Retry with higher strength (0.42) if:
-    //   a) model threw an error, OR
-    //   b) output is suspiciously small → model returned a near-unchanged image
     let b64: string | null = null;
     let lastError: unknown;
 
-    const strengths = [STRENGTH_DEFAULT, STRENGTH_RETRY] as const;
-    for (let attempt = 0; attempt < strengths.length; attempt++) {
+    const guidanceValues = [IMAGE_GUIDANCE_DEFAULT, IMAGE_GUIDANCE_RETRY] as const;
+    for (let attempt = 0; attempt < guidanceValues.length; attempt++) {
       try {
-        const url = await runModel(replicate, imageDataUrl, prompt, strengths[attempt]!);
+        const url = await runModel(replicate, imageBlob, prompt, guidanceValues[attempt]!);
         const imgRes = await fetch(url);
         if (!imgRes.ok) throw new Error(`Image fetch failed (${imgRes.status})`);
         const buf = Buffer.from(await imgRes.arrayBuffer());
 
         if (attempt === 0 && buf.length < MIN_TRANSFORMED_BYTES) {
-          // Output too small — model barely changed anything; retry at higher strength
-          lastError = new Error("output unchanged");
+          lastError = new Error("Model returned unchanged image");
           await new Promise((r) => setTimeout(r, 800));
           continue;
         }
@@ -210,21 +192,21 @@ export async function POST(req: Request) {
     });
 
   } catch (e) {
-    console.error("transform-image error:", e);
+    const errMsg = e instanceof Error ? e.message : String(e);
+    console.error("transform-image error:", errMsg);
 
-    // Fallback: return original image so the sticker UI still renders
+    // Fallback: return original image so the sticker UI still renders.
+    // Include the actual error so the UI can surface it for debugging.
     if (originalB64) {
       return NextResponse.json({
         imageBase64: originalB64,
         mimeType: "image/jpeg",
         year, country, position, displayName, mode, competitionMode,
         fallback: true,
+        fallbackReason: errMsg,
       });
     }
 
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: errMsg }, { status: 500 });
   }
 }
