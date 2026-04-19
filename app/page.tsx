@@ -49,6 +49,8 @@ export default function HomePage() {
   const [country, setCountry] = useState("");
   const [position, setPosition] = useState<OutfieldPosition>("Midfielder");
   const [userName, setUserName] = useState("");
+  const [generationCount, setGenerationCount] = useState(0);
+  const [lastRandomCountry, setLastRandomCountry] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
@@ -178,8 +180,15 @@ export default function HomePage() {
       return;
     }
 
-    const pickCountry = mode === "random" ? randomCountryForYear(year, competitionMode) : country;
+    const pickCountry = mode === "random"
+      ? randomCountryForYear(year, competitionMode, generationCount, lastRandomCountry)
+      : country;
     const pickPosition = mode === "random" ? randomOutfieldPosition() : position;
+
+    if (mode === "random") {
+      setGenerationCount((c) => c + 1);
+      setLastRandomCountry(pickCountry);
+    }
 
     generatingRef.current = true;
     setLoading(true);

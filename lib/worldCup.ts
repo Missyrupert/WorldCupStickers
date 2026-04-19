@@ -56,28 +56,44 @@ export function isCountryInYear(
   return !!list?.includes(country);
 }
 
-/** Favour these nations in random mode when they qualified (70% vs 30% full pool). */
-const POPULAR_COUNTRIES = [
-  "Brazil",
-  "Italy",
-  "Germany",
-  "Argentina",
-  "France",
-  "England",
-  "Netherlands",
+export const TOP_TEAMS = [
+  "Brazil", "Italy", "Germany", "Argentina", "France", "England", "Netherlands",
 ] as const;
 
-export function randomCountryForYear(year: number, mode: CompetitionMode): string {
+/**
+ * Cycle-based country selection:
+ *   generationCount % 3 === 0  →  pick from TOP_TEAMS (every 3rd spin)
+ *   otherwise                  →  pick from the rest of the valid pool
+ *
+ * Never repeats the same country back-to-back (lastCountry guard).
+ */
+export function randomCountryForYear(
+  year: number,
+  mode: CompetitionMode,
+  generationCount: number = 0,
+  lastCountry: string = ""
+): string {
   const list = table(mode)[String(year)];
   if (!list?.length) throw new Error(`No participant list for year ${year} (${mode})`);
-  const popularInYear = POPULAR_COUNTRIES.filter((c) => list.includes(c));
-  if (popularInYear.length === 0) {
-    return list[Math.floor(Math.random() * list.length)]!;
+
+  const topInYear = TOP_TEAMS.filter((c) => list.includes(c));
+  const topSet = new Set<string>(TOP_TEAMS);
+  const restInYear = list.filter((c) => !topSet.has(c));
+
+  // Every 3rd generation is a "big team" pick; fall back to full pool if no top teams qualified
+  const useTop = generationCount % 3 === 0 && topInYear.length > 0;
+  const pool = useTop
+    ? topInYear
+    : restInYear.length > 0 ? restInYear : list;
+
+  // Try up to 6 times to avoid repeating last country
+  for (let i = 0; i < 6; i++) {
+    const pick = pool[Math.floor(Math.random() * pool.length)]!;
+    if (pick !== lastCountry) return pick;
   }
-  if (Math.random() < 0.7) {
-    return popularInYear[Math.floor(Math.random() * popularInYear.length)]!;
-  }
-  return list[Math.floor(Math.random() * list.length)]!;
+
+  // If pool only has one option and it matches lastCountry, just return it
+  return pool[Math.floor(Math.random() * pool.length)]!;
 }
 
 export function randomOutfieldPosition(): OutfieldPosition {
