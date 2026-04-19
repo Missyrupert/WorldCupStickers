@@ -1,4 +1,4 @@
-/* ── Outer gold border ── */
+/* ── Gold border ── */
 .root {
   position: relative;
   width: 100%;
@@ -13,7 +13,6 @@
     0 16px 48px rgba(0, 0, 0, 0.5);
 }
 
-/* ── White card body ── */
 .inner {
   background: #fff;
   border-radius: 6px;
@@ -22,32 +21,45 @@
 
 /* ── Top band ── */
 .topBand {
-  background: linear-gradient(90deg, #0c1b3d 0%, #1a3060 55%, #0c1b3d 100%);
-  padding: 6px 10px;
+  background: linear-gradient(90deg, #071830 0%, #0f2d5e 50%, #071830 100%);
+  padding: 7px 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 
+.topLeft {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+}
+
+.topBall {
+  font-size: 0.7rem;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
 .tournamentLabel {
-  font-size: 0.48rem;
+  font-size: 0.6rem;
   font-weight: 800;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.65);
-  flex: 1;
+  color: rgba(255, 255, 255, 0.88);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .yearBadge {
-  font-size: 0.72rem;
+  font-size: 0.9rem;
   font-weight: 900;
   color: #f5d020;
   letter-spacing: 0.03em;
   flex-shrink: 0;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 
 /* ── Photo ── */
@@ -76,17 +88,11 @@
 }
 
 @keyframes stickerReveal {
-  from {
-    opacity: 0.3;
-    filter: blur(6px);
-  }
-  to {
-    opacity: 1;
-    filter: none;
-  }
+  from { opacity: 0.3; filter: blur(6px); }
+  to   { opacity: 1;   filter: none; }
 }
 
-/* ── Country flag ── */
+/* ── Flag (photo corner) ── */
 .flagWrap {
   position: absolute;
   top: 8px;
@@ -95,9 +101,7 @@
   height: 30px;
   border-radius: 3px;
   overflow: hidden;
-  box-shadow:
-    0 1px 4px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(255, 255, 255, 0.5);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.5);
   background: #ddd;
   display: flex;
   align-items: center;
@@ -117,14 +121,14 @@
   right: 8px;
   font-size: 0.5rem;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.7);
-  background: rgba(0, 0, 0, 0.5);
+  color: rgba(255,255,255,0.7);
+  background: rgba(0,0,0,0.5);
   padding: 2px 5px;
   border-radius: 999px;
   letter-spacing: 0.03em;
 }
 
-/* ── Bottom name panel ── */
+/* ── Bottom panel ── */
 .bottomPanel {
   background: linear-gradient(180deg, #faf8f0 0%, #ede9db 100%);
   padding: 9px 10px 11px;
@@ -133,13 +137,13 @@
 
 .name {
   font-family: var(--font-sticker-name, Oswald), Impact, "Arial Narrow Bold", sans-serif;
-  font-size: 1.1rem;
+  font-size: 1.18rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   color: #0a0a0a;
   text-transform: uppercase;
   line-height: 1.0;
-  margin: 0 0 6px;
+  margin: 0 0 7px;
   word-break: break-word;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -160,21 +164,34 @@
   letter-spacing: 0.1em;
   color: #fff;
   background: #b87a0a;
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: 999px;
   flex-shrink: 0;
-  line-height: 1.5;
+  line-height: 1.6;
+}
+
+/* ── Country with flag ── */
+.countryRow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+}
+
+.metaFlag {
+  display: block;
+  border-radius: 2px;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.15);
 }
 
 .country {
-  font-size: 0.56rem;
-  font-weight: 600;
-  color: #555;
-  text-align: right;
-  flex: 1;
+  font-size: 0.58rem;
+  font-weight: 700;
+  color: #444;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
