@@ -480,7 +480,7 @@ export default function HomePage() {
             </div>
             <p className="hint">
               {mode === "random"
-                ? "Random country + position. Claude AI adapts your name to match."
+                ? "Random country + position. AI adapts your name to match."
                 : "You choose country and position. Your name appears exactly as typed."}
             </p>
           </div>
