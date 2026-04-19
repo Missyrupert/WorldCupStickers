@@ -61,11 +61,9 @@ export const TOP_TEAMS = [
 ] as const;
 
 /**
- * Cycle-based country selection:
- *   generationCount % 3 === 0  →  pick from TOP_TEAMS (every 3rd spin)
- *   otherwise                  →  pick from the rest of the valid pool
- *
- * Never repeats the same country back-to-back (lastCountry guard).
+ * Weighted random selection — top teams appear more often but are never guaranteed.
+ * generationCount is hashed (golden ratio) to vary the top-team weight each call,
+ * preventing any detectable pattern in the output sequence.
  */
 export function randomCountryForYear(
   year: number,
@@ -76,24 +74,33 @@ export function randomCountryForYear(
   const list = table(mode)[String(year)];
   if (!list?.length) throw new Error(`No participant list for year ${year} (${mode})`);
 
-  const topInYear = TOP_TEAMS.filter((c) => list.includes(c));
   const topSet = new Set<string>(TOP_TEAMS);
-  const restInYear = list.filter((c) => !topSet.has(c));
 
-  // Every 3rd generation is a "big team" pick; fall back to full pool if no top teams qualified
-  const useTop = generationCount % 3 === 0 && topInYear.length > 0;
-  const pool = useTop
-    ? topInYear
-    : restInYear.length > 0 ? restInYear : list;
+  // Golden-ratio hash of generationCount → weight oscillates between 2.0–4.0
+  // with no modulo-style period, so no pattern is visible to users
+  const hash = (generationCount * 2654435761) >>> 0;
+  const topWeight = 2.0 + (hash / 0xffffffff) * 2.0;
 
-  // Try up to 6 times to avoid repeating last country
-  for (let i = 0; i < 6; i++) {
-    const pick = pool[Math.floor(Math.random() * pool.length)]!;
-    if (pick !== lastCountry) return pick;
+  // Build weighted pool excluding lastCountry (no back-to-back repeat)
+  const pool = list
+    .filter((c) => c !== lastCountry)
+    .map((c) => ({ country: c, weight: topSet.has(c) ? topWeight : 1.0 }));
+
+  // Fallback: if the whole list is just lastCountry, drop the exclusion
+  const effective = pool.length > 0
+    ? pool
+    : list.map((c) => ({ country: c, weight: topSet.has(c) ? topWeight : 1.0 }));
+
+  // Weighted reservoir walk
+  const total = effective.reduce((s, e) => s + e.weight, 0);
+  let r = Math.random() * total;
+  for (const entry of effective) {
+    r -= entry.weight;
+    if (r <= 0) return entry.country;
   }
 
-  // If pool only has one option and it matches lastCountry, just return it
-  return pool[Math.floor(Math.random() * pool.length)]!;
+  // Floating-point safety fallback
+  return effective[effective.length - 1]!.country;
 }
 
 export function randomOutfieldPosition(): OutfieldPosition {
