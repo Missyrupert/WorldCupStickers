@@ -19,12 +19,17 @@ import Replicate from "replicate";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-// img2img with LOW strength = identity preserved, only clothing + background change
 const MODEL = "stability-ai/sdxl";
-const PROMPT_STRENGTH = 0.25;
+const STRENGTH_DEFAULT = 0.38; // balanced: visible kit change, face preserved
+const STRENGTH_RETRY   = 0.42; // adaptive retry if output looks unchanged
+const STRENGTH_MAX     = 0.45; // hard ceiling — never exceed
 const GUIDANCE_SCALE = 7.5;
 const STEPS = 25;
 const TIMEOUT_MS = 55_000;
+
+// SDXL at 768×1024 always produces PNG > 150 KB.
+// If decoded output is smaller, the model likely returned a near-unchanged image.
+const MIN_TRANSFORMED_BYTES = 150_000;
 
 const NEGATIVE_PROMPT =
   "different face, changed identity, altered facial features, face replacement, " +
@@ -38,8 +43,10 @@ function isOutfieldPosition(s: string): s is OutfieldPosition {
 async function runModel(
   replicate: Replicate,
   imageDataUrl: string,
-  prompt: string
+  prompt: string,
+  strength: number
 ): Promise<string> {
+  const clampedStrength = Math.min(strength, STRENGTH_MAX);
   const timeout = new Promise<never>((_, reject) =>
     setTimeout(() => reject(new Error("timed out")), TIMEOUT_MS)
   );
@@ -50,7 +57,7 @@ async function runModel(
         image: imageDataUrl,
         prompt,
         negative_prompt: NEGATIVE_PROMPT,
-        prompt_strength: PROMPT_STRENGTH,
+        prompt_strength: clampedStrength,
         num_inference_steps: STEPS,
         guidance_scale: GUIDANCE_SCALE,
         width: 768,
@@ -162,15 +169,29 @@ export async function POST(req: Request) {
     const prompt = buildTransformImagePrompt(year, country, competitionMode);
     const imageDataUrl = `data:image/jpeg;base64,${originalB64}`;
 
-    // Try once, retry once on failure
+    // Attempt 1: default strength (0.38)
+    // Retry with higher strength (0.42) if:
+    //   a) model threw an error, OR
+    //   b) output is suspiciously small → model returned a near-unchanged image
     let b64: string | null = null;
     let lastError: unknown;
-    for (let attempt = 0; attempt < 2; attempt++) {
+
+    const strengths = [STRENGTH_DEFAULT, STRENGTH_RETRY] as const;
+    for (let attempt = 0; attempt < strengths.length; attempt++) {
       try {
-        const url = await runModel(replicate, imageDataUrl, prompt);
+        const url = await runModel(replicate, imageDataUrl, prompt, strengths[attempt]!);
         const imgRes = await fetch(url);
         if (!imgRes.ok) throw new Error(`Image fetch failed (${imgRes.status})`);
-        b64 = Buffer.from(await imgRes.arrayBuffer()).toString("base64");
+        const buf = Buffer.from(await imgRes.arrayBuffer());
+
+        if (attempt === 0 && buf.length < MIN_TRANSFORMED_BYTES) {
+          // Output too small — model barely changed anything; retry at higher strength
+          lastError = new Error("output unchanged");
+          await new Promise((r) => setTimeout(r, 800));
+          continue;
+        }
+
+        b64 = buf.toString("base64");
         break;
       } catch (err) {
         lastError = err;
