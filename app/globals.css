@@ -70,6 +70,30 @@ main {
   margin-top: 1.75rem;
 }
 
+.generate-row {
+  margin-top: 1.25rem;
+}
+
+.preview-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  height: 100%;
+  color: var(--muted);
+}
+
+.preview-empty span {
+  font-size: 2rem;
+  opacity: 0.4;
+}
+
+.preview-empty p {
+  font-size: 0.8rem;
+  margin: 0;
+}
+
 h1 {
   font-size: 1.75rem;
   font-weight: 700;

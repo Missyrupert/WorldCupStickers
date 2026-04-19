@@ -97,11 +97,6 @@ export default function HomePage() {
     });
   }, []);
 
-  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (f) setImageFile(f);
-  };
-
   const startCamera = async () => {
     setError(null);
     try {
@@ -118,7 +113,7 @@ export default function HomePage() {
         }
       });
     } catch {
-      setError("Camera access denied. Please upload a photo instead.");
+      setError("Camera access denied — please check your browser permissions and try again.");
     }
   };
 
@@ -168,11 +163,11 @@ export default function HomePage() {
     setError(null);
 
     if (!file) {
-      setError("Please upload a photo or take a selfie first.");
+      setError("Take a selfie first — then hit Generate.");
       return;
     }
     if (!userName.trim()) {
-      setError("Please enter your name.");
+      setError("Enter your name first.");
       return;
     }
     if (mode === "custom" && !country) {
@@ -193,8 +188,7 @@ export default function HomePage() {
     generatingRef.current = true;
     setLoading(true);
     setWarning(null);
-    // Only show blurred placeholder on first generation.
-    // On re-runs keep the previous result visible until the new one arrives.
+
     if (!result) {
       setPendingSticker({
         imageSrc: previewUrl!,
@@ -242,7 +236,7 @@ export default function HomePage() {
 
         if (data.fallback) {
           const reason = typeof data.fallbackReason === "string" ? ` (${data.fallbackReason})` : "";
-          setWarning(`Couldn't transform this one — try again for a fresh attempt.${reason}`);
+          setWarning(`Couldn't transform this one — try again.${reason}`);
         }
 
         setResult({
@@ -264,7 +258,7 @@ export default function HomePage() {
 
         if (data.fallback) {
           const reason = typeof data.fallbackReason === "string" ? ` (${data.fallbackReason})` : "";
-          setWarning(`Couldn't transform this one — try again for a fresh attempt.${reason}`);
+          setWarning(`Couldn't transform this one — try again.${reason}`);
         }
 
         const displayName =
@@ -337,20 +331,14 @@ export default function HomePage() {
     }
   };
 
-  const tryAgain = () => {
-    // Keep image + year. Re-randomise country, position, name via generate().
-    // Temporarily force random mode pick by calling generate() — mode state already handles this.
-    void generate();
-  };
+  const tryAgain = () => void generate();
 
   const stickerImageSrc =
     result != null
       ? `data:${result.mimeType};base64,${result.imageBase64}`
       : (pendingSticker?.imageSrc ?? "");
   const stickerMeta = result ?? pendingSticker;
-  // Blur placeholder only on first generation (no previous result yet)
   const stickerImagePending = loading && result === null && pendingSticker !== null;
-  // Dimming overlay when re-generating over an existing result
   const stickerRegenerating = loading && result !== null;
 
   return (
@@ -359,74 +347,29 @@ export default function HomePage() {
         <div className="header-badge">⚽ AI STICKER GENERATOR</div>
         <h1>World Cup Sticker Generator</h1>
         <p className="sub">
-          Upload your photo and become a FIFA World Cup legend. AI transforms you into a
-          photorealistic footballer — same face, national kit, stadium backdrop. Pick your
-          tournament year, country, and position.
+          Take a selfie and become a FIFA World Cup legend. AI transforms you into a
+          photorealistic footballer — same face, national kit, stadium backdrop.
         </p>
       </header>
 
       <div className="layout-columns">
-        {/* ── Left: Photo panel ── */}
-        <section className="card layout-left">
-          <h2>Your Photo</h2>
 
-          <label htmlFor="file">Upload an image</label>
+        {/* ── Left: Settings ── */}
+        <section className="card layout-left">
+          <h2>Your Details</h2>
+
+          <label htmlFor="userName">Your full name</label>
           <input
-            id="file"
-            type="file"
-            accept="image/*"
+            id="userName"
+            type="text"
+            placeholder="e.g. Chris Lee"
+            value={userName}
             disabled={loading}
-            onChange={onFileChange}
+            onChange={(e) => setUserName(e.target.value)}
+            autoComplete="name"
           />
 
-          <p className="hint" style={{ marginTop: "0.75rem" }}>
-            Or use your camera — position your face in the oval guide.
-          </p>
-
-          <div className="row" style={{ marginTop: "0.5rem" }}>
-            {!camOn ? (
-              <button type="button" className="btn secondary" disabled={loading} onClick={startCamera}>
-                📷 Open camera
-              </button>
-            ) : (
-              <>
-                <button type="button" className="btn secondary" onClick={stopCamera}>
-                  Close
-                </button>
-                <button type="button" className="btn" disabled={loading} onClick={captureFromCamera}>
-                  Capture photo
-                </button>
-              </>
-            )}
-          </div>
-
-          {camOn && (
-            <div className="cam-container" style={{ marginTop: "0.75rem" }}>
-              <video ref={videoRef} className="cam" playsInline muted />
-              <div className="cam-overlay" aria-hidden>
-                <div className="cam-oval-guide" />
-                <span className="cam-guide-text">Center your face</span>
-              </div>
-            </div>
-          )}
-
-          {!camOn && (
-            <div className="preview-wrap" style={{ marginTop: "0.75rem" }}>
-              {previewUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={previewUrl} alt="Your photo preview" />
-              ) : (
-                <span className="hint" style={{ padding: "1rem" }}>No image selected</span>
-              )}
-            </div>
-          )}
-        </section>
-
-        {/* ── Right: Settings panel ── */}
-        <section className="card layout-right">
-          <h2>Sticker Settings</h2>
-
-          <label htmlFor="competition">Competition</label>
+          <label htmlFor="competition" style={{ marginTop: "1rem", display: "block" }}>Competition</label>
           <select
             id="competition"
             value={competitionMode}
@@ -442,9 +385,7 @@ export default function HomePage() {
             <option value="women">Women&apos;s World Cup</option>
           </select>
 
-          <label htmlFor="year" style={{ marginTop: "1rem", display: "block" }}>
-            Tournament year
-          </label>
+          <label htmlFor="year" style={{ marginTop: "1rem", display: "block" }}>Tournament year</label>
           <select
             id="year"
             value={year}
@@ -452,9 +393,7 @@ export default function HomePage() {
             onChange={(e) => setYear(Number(e.target.value))}
           >
             {tournamentYears.map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
+              <option key={y} value={y}>{y}</option>
             ))}
           </select>
 
@@ -485,19 +424,6 @@ export default function HomePage() {
             </p>
           </div>
 
-          <div style={{ marginTop: "1rem" }}>
-            <label htmlFor="userName">Your full name</label>
-            <input
-              id="userName"
-              type="text"
-              placeholder="e.g. Chris Lee"
-              value={userName}
-              disabled={loading}
-              onChange={(e) => setUserName(e.target.value)}
-              autoComplete="name"
-            />
-          </div>
-
           {mode === "custom" && (
             <>
               <div style={{ marginTop: "1rem" }}>
@@ -509,9 +435,7 @@ export default function HomePage() {
                   onChange={(e) => setCountry(e.target.value)}
                 >
                   {countries.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
+                    <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
               </div>
@@ -524,36 +448,92 @@ export default function HomePage() {
                   onChange={(e) => setPosition(e.target.value as OutfieldPosition)}
                 >
                   {OUTFIELD_POSITIONS.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
+                    <option key={p} value={p}>{p}</option>
                   ))}
                 </select>
               </div>
             </>
           )}
+        </section>
 
-          <div style={{ marginTop: "1.5rem" }}>
-            <button
-              type="button"
-              className="btn btn-generate btn-full"
-              onClick={() => void generate()}
-              disabled={loading}
-              aria-busy={loading}
-            >
-              {loading ? (
-                <>
-                  <span className="spinner spinner-in-btn" aria-hidden />
-                  Generating your sticker…
-                </>
-              ) : (
-                "⚡ Generate sticker"
-              )}
-            </button>
+        {/* ── Right: Camera ── */}
+        <section className="card layout-right">
+          <h2>Your Selfie</h2>
+
+          {!camOn && !previewUrl && (
+            <p className="hint" style={{ marginBottom: "0.75rem" }}>
+              Position your face in the oval guide and capture your photo.
+            </p>
+          )}
+
+          <div className="row">
+            {!camOn ? (
+              <button
+                type="button"
+                className="btn btn-full"
+                disabled={loading}
+                onClick={startCamera}
+              >
+                📷 {previewUrl ? "Retake selfie" : "Open camera"}
+              </button>
+            ) : (
+              <>
+                <button type="button" className="btn secondary" onClick={stopCamera}>
+                  Cancel
+                </button>
+                <button type="button" className="btn" disabled={loading} onClick={captureFromCamera}>
+                  Capture
+                </button>
+              </>
+            )}
           </div>
 
-          {error && <p className="error">{error}</p>}
+          {camOn && (
+            <div className="cam-container" style={{ marginTop: "0.75rem" }}>
+              <video ref={videoRef} className="cam" playsInline muted />
+              <div className="cam-overlay" aria-hidden>
+                <div className="cam-oval-guide" />
+                <span className="cam-guide-text">Center your face</span>
+              </div>
+            </div>
+          )}
+
+          {!camOn && (
+            <div className="preview-wrap" style={{ marginTop: "0.75rem" }}>
+              {previewUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={previewUrl} alt="Your selfie" />
+              ) : (
+                <div className="preview-empty">
+                  <span>📷</span>
+                  <p>No photo yet</p>
+                </div>
+              )}
+            </div>
+          )}
         </section>
+
+      </div>
+
+      {/* ── Generate — full width below both panels ── */}
+      <div className="generate-row">
+        <button
+          type="button"
+          className="btn btn-generate btn-full"
+          onClick={() => void generate()}
+          disabled={loading}
+          aria-busy={loading}
+        >
+          {loading ? (
+            <>
+              <span className="spinner spinner-in-btn" aria-hidden />
+              Generating your sticker…
+            </>
+          ) : (
+            "⚡ Generate sticker"
+          )}
+        </button>
+        {error && <p className="error" style={{ textAlign: "center" }}>{error}</p>}
       </div>
 
       {/* ── Sticker output ── */}
@@ -593,26 +573,13 @@ export default function HomePage() {
                 </p>
               )}
               <div className="actions">
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={loading}
-                  onClick={tryAgain}
-                >
+                <button type="button" className="btn" disabled={loading} onClick={tryAgain}>
                   🔄 Try Again
                 </button>
-                <button
-                  type="button"
-                  className="btn secondary"
-                  onClick={() => void shareSticker()}
-                >
+                <button type="button" className="btn secondary" onClick={() => void shareSticker()}>
                   📤 Share
                 </button>
-                <button
-                  type="button"
-                  className="btn secondary"
-                  onClick={() => void downloadSticker()}
-                >
+                <button type="button" className="btn secondary" onClick={() => void downloadSticker()}>
                   ⬇ Download
                 </button>
               </div>
